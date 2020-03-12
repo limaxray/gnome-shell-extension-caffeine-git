@@ -6,95 +6,61 @@
 pkgname=gnome-shell-extension-caffeine-git
 pkgver=r130
 pkgrel=1
+_extid="caffeine@patapon.info"
 pkgdesc="Fill the cup to inhibit auto suspend and screensaver."
 arch=(any)
 url="https://github.com/eonpatapon/gnome-shell-extension-caffeine"
 license=(GPLv2)
+install=gschemas.install
 
-makedepends+=('git')
-source+=("${_gitname:=${pkgname%-git}}::${_giturl:-git+$url}")
-for integ in $(get_integlist)
-do
-  typeset -n array="${integ}sums"
-  array+=('SKIP')
-done
-provides+=("$_gitname=$pkgver")
-conflicts+=("$_gitname")
+depends=('gnome-shell')
+makedepends=('git')
+source=("${pkgname}::git+${url}")
+sha256sums=('SKIP')
+
 pkgver() {
-  cd ${_gitname:-$pkgname}
-  git describe --long --tags 2>/dev/null | sed 's/[^[:digit:]]*\(.\+\)-\([[:digit:]]\+\)-g\([[:xdigit:]]\{7\}\)/\1.r\2.g\3/;t;q1'
-  [ ${PIPESTATUS[0]} -ne 0 ] && \
-printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
-}
-package() {
-  for function in $(declare -F | grep -Po 'package_[[:digit:]]+[[:alpha:]_]*$')
-  do
-    $function
-  done
-}
-package_01_locate() {
-  msg2 'Locating extension...'
-  cd "$(find -name 'metadata.json' -execdir test -e extension.js \; \
-    -printf '%C@ %h\n' | sort -nr | sed 's/^.* //;q' )"
-  extname=$(grep -Po '(?<="uuid": ")[^"]*' metadata.json)
-  destdir="$pkgdir/usr/share/gnome-shell/extensions/$extname"
-}
-
-package_02_install() {
-  msg2 'Installing extension code...'
-  find -maxdepth 1 \( -iname '*.js*' -or -iname '*.css' -or -iname '*.ui' \) \
-    -exec install -Dm644 -t "$destdir" '{}' +
-}
-depends+=(gnome-shell-extensions)
-
-package_03_unify_conveniencejs() {
-  ln -fs \
-    ../user-theme@gnome-shell-extensions.gcampax.github.com/convenience.js \
-    "$destdir/convenience.js"
+	cd "${srcdir}/${pkgname}"
+	printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
 build() {
-  cd "$_gitname"
-  ./update-locale.sh
+  cd "${srcdir}/${pkgname}"
+  msg2 'Updating locales...'
+  ./update-locale.sh &> /dev/null
+}
+package() {
+	usrdir="${pkgdir}/usr/share"
+	extdir="${usrdir}/gnome-shell/extensions/${_extid}"
+	schdir="${usrdir}/glib-2.0/schemas"
+
+	cd "${srcdir}/${pkgname}/${_extid}"
+
+  	msg2 'Installing extension...'
+	install -dm755 "${extdir}"
+	for file in $(find -maxdepth 1 -type f -iregex '.*\.\(js\|json\|css\)$'); do
+		install -m644 "${file}" "${extdir}"
+	done
+
+  	msg2 'Installing icons...'
+	install -dm755 "${extdir}/icons"
+	for file in $(find 'icons' -maxdepth 1 -type f -iregex '.*\.\(svg\|png\)$'); do
+		install -m644 "${file}" "${extdir}/icons"
+	done
+
+  	msg2 'Installing translations...'
+    for dir in $(find 'locale' -type d -name 'LC_MESSAGES'); do
+		install -dm755 "${usrdir}/${dir}"
+		for file in $(find "${dir}" -type f -iregex '.*\.mo$'); do
+			install -m644 "${file}" "${usrdir}/${dir}"
+		done
+	done
+
+	msg2 'Installing schemas...'
+	install -dm755 "${schdir}"
+	for file in $(find 'schemas' -maxdepth 1 -type f -iregex '.*\.xml$'); do
+		install -m644 "${file}" "${schdir}"
+	done
 }
 
-package_09_icons() {
-  cp -r --no-preserve=ownership,mode icons "$destdir"
-}
 
-package_10_locale() {
-  msg2 'Installing translations...'
-  (
-    cd locale
-    for locale in */
-    do
-      install -Dm644 -t "$pkgdir/usr/share/locale/$locale/LC_MESSAGES" "$locale/LC_MESSAGES"/*.mo
-    done
-  )
-}
-if [ -z "$install" ]
-then
-  install=gschemas.install
-fi
 
-package_10_schemas() {
-  msg2 'Installing schemas...'
-  find -name '*.xml' -exec install -Dm644 -t "$pkgdir/usr/share/glib-2.0/schemas" '{}' +
-}
-depends[125]=gnome-shell
-
-package_20_version() {
-  local compatibles=($(\
-    find -path ./pkg -type d -prune -o \
-    -name metadata.json -exec cat '{}' \; | \
-    tr -d '\n' | grep -Po '(?<="shell-version": \[)[^\[\]]*(?=\])' | \
-    tr '\n," ' '\n' | sed 's/3\.//g;/^$/d' | sort -n -t. -k 1,1))
-  depends+=("gnome-shell>=3.${compatibles[0]}")
-  local max="${compatibles[-1]}"
-  if [ "$max" != $(
-    gnome-shell --version | grep -Po '(?<=GNOME Shell 3\.)[[:digit:]]+'
-  ) ]; then
-    depends+=("gnome-shell<3.$((${max%%.*} + 1))")
-  fi
-  unset depends[125]
-}
